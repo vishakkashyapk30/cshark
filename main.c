@@ -81,13 +81,7 @@ int main(int argc, char *argv[]) {
                 
             case 3:
                 // Inspect last session
-                if (!storage_has_session()) {
-                    printf("\n[C-Shark] No capture session available.\n");
-                    printf("[C-Shark] Please capture some packets first (Option 1 or 2).\n");
-                } else {
-                    printf("\n[C-Shark] This feature will be fully implemented in Phase 5.\n");
-                    printf("[C-Shark] Current session has %u packets stored.\n", storage_get_count());
-                }
+                inspect_session();
                 break;
                 
             case 4:

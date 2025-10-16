@@ -16,7 +16,7 @@ void display_main_menu(const char *selected_interface) {
     printf("\n[C-Shark] Interface '%s' selected. What's next?\n", selected_interface);
     printf("\n1. Start Sniffing (All Packets)\n");
     printf("2. Start Sniffing (With Filters)\n");
-    printf("3. Inspect Last Session <-- To be implemented later\n");
+    printf("3. Inspect Last Session\n");
     printf("4. Exit C-Shark\n");
     printf("\nEnter your choice (1-4): ");
     fflush(stdout);
@@ -59,11 +59,212 @@ void display_packet_summary(const parsed_packet_t *packet) {
 }
 
 void display_packet_detailed(const parsed_packet_t *packet) {
-    // Implementation for Phase 5
-    printf("\n========================================\n");
-    printf("DETAILED PACKET INSPECTION\n");
-    printf("========================================\n");
-    display_packet_live(packet);
+    printf("\n");
+    printf("╔════════════════════════════════════════════════════════════════════╗\n");
+    printf("║          DETAILED PACKET INSPECTION - PACKET #%-5u             ║\n", packet->id);
+    printf("╚════════════════════════════════════════════════════════════════════╝\n");
+    
+    // Basic packet information
+    printf("\n[PACKET METADATA]\n");
+    printf("  Packet ID:        %u\n", packet->id);
+    printf("  Timestamp:        %ld.%06ld\n", packet->timestamp.tv_sec, packet->timestamp.tv_usec);
+    printf("  Captured Length:  %u bytes\n", packet->length);
+    printf("  Total Length:     %u bytes\n", packet->raw_length);
+    
+    // Layer 2 - Ethernet
+    printf("\n╔════════════════════════════════════════════════════════════════════╗\n");
+    printf("║ LAYER 2 - DATA LINK (ETHERNET)                                    ║\n");
+    printf("╚════════════════════════════════════════════════════════════════════╝\n");
+    printf("  Destination MAC:  ");
+    display_mac_address(packet->dst_mac);
+    printf("\n  Source MAC:       ");
+    display_mac_address(packet->src_mac);
+    printf("\n  EtherType:        0x%04X (", packet->ethertype);
+    switch (packet->ethertype) {
+        case 0x0800: printf("IPv4"); break;
+        case 0x86DD: printf("IPv6"); break;
+        case 0x0806: printf("ARP"); break;
+        default: printf("Unknown"); break;
+    }
+    printf(")\n");
+    
+    // Layer 3 - Network Layer
+    if (packet->l3_protocol != PROTO_UNKNOWN) {
+        printf("\n╔════════════════════════════════════════════════════════════════════╗\n");
+        printf("║ LAYER 3 - NETWORK                                                 ║\n");
+        printf("╚════════════════════════════════════════════════════════════════════╝\n");
+        
+        if (packet->l3_protocol == PROTO_IPv4) {
+            printf("  Protocol:         IPv4\n");
+            printf("  Source IP:        %s\n", packet->src_ip);
+            printf("  Destination IP:   %s\n", packet->dst_ip);
+            printf("  Version:          4\n");
+            printf("  Header Length:    %u bytes\n", packet->l3_data.ipv4.header_length);
+            printf("  TTL:              %u\n", packet->l3_data.ipv4.ttl);
+            printf("  Protocol:         %u (", packet->l3_data.ipv4.protocol);
+            if (packet->l3_data.ipv4.protocol == 6) printf("TCP");
+            else if (packet->l3_data.ipv4.protocol == 17) printf("UDP");
+            else if (packet->l3_data.ipv4.protocol == 1) printf("ICMP");
+            else printf("Unknown");
+            printf(")\n");
+            printf("  Packet ID:        0x%04X (%u)\n", packet->l3_data.ipv4.id, packet->l3_data.ipv4.id);
+            printf("  Total Length:     %u bytes\n", packet->l3_data.ipv4.total_length);
+            printf("  Flags:            0x%01X", packet->l3_data.ipv4.flags);
+            if (packet->l3_data.ipv4.flags) {
+                printf(" (");
+                if (packet->l3_data.ipv4.flags & 0x02) printf("Don't Fragment ");
+                if (packet->l3_data.ipv4.flags & 0x01) printf("More Fragments");
+                printf(")");
+            }
+            printf("\n");
+            
+        } else if (packet->l3_protocol == PROTO_IPv6) {
+            printf("  Protocol:         IPv6\n");
+            printf("  Source IP:        %s\n", packet->src_ip);
+            printf("  Destination IP:   %s\n", packet->dst_ip);
+            printf("  Version:          6\n");
+            printf("  Traffic Class:    %u\n", packet->l3_data.ipv6.traffic_class);
+            printf("  Flow Label:       0x%05X\n", packet->l3_data.ipv6.flow_label);
+            printf("  Payload Length:   %u bytes\n", packet->l3_data.ipv6.payload_length);
+            printf("  Next Header:      %u (", packet->l3_data.ipv6.next_header);
+            if (packet->l3_data.ipv6.next_header == 6) printf("TCP");
+            else if (packet->l3_data.ipv6.next_header == 17) printf("UDP");
+            else printf("Unknown");
+            printf(")\n");
+            printf("  Hop Limit:        %u\n", packet->l3_data.ipv6.hop_limit);
+            
+        } else if (packet->l3_protocol == PROTO_ARP) {
+            printf("  Protocol:         ARP\n");
+            printf("  Hardware Type:    %u\n", packet->l3_data.arp.hw_type);
+            printf("  Protocol Type:    0x%04X\n", packet->l3_data.arp.proto_type);
+            printf("  HW Address Len:   %u\n", packet->l3_data.arp.hw_len);
+            printf("  Proto Address Len: %u\n", packet->l3_data.arp.proto_len);
+            printf("  Operation:        %u (", packet->l3_data.arp.operation);
+            if (packet->l3_data.arp.operation == 1) printf("Request");
+            else if (packet->l3_data.arp.operation == 2) printf("Reply");
+            else printf("Unknown");
+            printf(")\n");
+            printf("  Sender MAC:       ");
+            display_mac_address(packet->l3_data.arp.sender_mac);
+            printf("\n  Sender IP:        %s\n", packet->src_ip);
+            printf("  Target MAC:       ");
+            display_mac_address(packet->l3_data.arp.target_mac);
+            printf("\n  Target IP:        %s\n", packet->dst_ip);
+        }
+    }
+    
+    // Layer 4 - Transport Layer
+    if (packet->l4_protocol != PROTO_UNKNOWN) {
+        printf("\n╔════════════════════════════════════════════════════════════════════╗\n");
+        printf("║ LAYER 4 - TRANSPORT                                               ║\n");
+        printf("╚════════════════════════════════════════════════════════════════════╝\n");
+        
+        if (packet->l4_protocol == PROTO_TCP) {
+            printf("  Protocol:         TCP\n");
+            printf("  Source Port:      %u", packet->src_port);
+            const char *src_svc = get_port_service(packet->src_port);
+            if (src_svc[0] != '\0') printf(" (%s)", src_svc);
+            printf("\n");
+            printf("  Dest Port:        %u", packet->dst_port);
+            const char *dst_svc = get_port_service(packet->dst_port);
+            if (dst_svc[0] != '\0') printf(" (%s)", dst_svc);
+            printf("\n");
+            printf("  Sequence Number:  %u\n", packet->l4_data.tcp.seq_num);
+            printf("  Ack Number:       %u\n", packet->l4_data.tcp.ack_num);
+            printf("  Header Length:    %u bytes\n", packet->l4_data.tcp.header_length);
+            printf("  Flags:            0x%02X [", packet->l4_data.tcp.flags);
+            int first = 1;
+            if (packet->l4_data.tcp.flags & 0x02) { if (!first) printf(","); printf("SYN"); first = 0; }
+            if (packet->l4_data.tcp.flags & 0x10) { if (!first) printf(","); printf("ACK"); first = 0; }
+            if (packet->l4_data.tcp.flags & 0x08) { if (!first) printf(","); printf("PSH"); first = 0; }
+            if (packet->l4_data.tcp.flags & 0x01) { if (!first) printf(","); printf("FIN"); first = 0; }
+            if (packet->l4_data.tcp.flags & 0x04) { if (!first) printf(","); printf("RST"); first = 0; }
+            if (packet->l4_data.tcp.flags & 0x20) { if (!first) printf(","); printf("URG"); }
+            printf("]\n");
+            printf("  Window Size:      %u\n", packet->l4_data.tcp.window);
+            printf("  Checksum:         0x%04X\n", packet->l4_data.tcp.checksum);
+            
+        } else if (packet->l4_protocol == PROTO_UDP) {
+            printf("  Protocol:         UDP\n");
+            printf("  Source Port:      %u", packet->src_port);
+            const char *src_svc = get_port_service(packet->src_port);
+            if (src_svc[0] != '\0') printf(" (%s)", src_svc);
+            printf("\n");
+            printf("  Dest Port:        %u", packet->dst_port);
+            const char *dst_svc = get_port_service(packet->dst_port);
+            if (dst_svc[0] != '\0') printf(" (%s)", dst_svc);
+            printf("\n");
+            printf("  Length:           %u bytes\n", packet->l4_data.udp.length);
+            printf("  Checksum:         0x%04X\n", packet->l4_data.udp.checksum);
+        }
+    }
+    
+    // Layer 7 - Application/Payload
+    if (packet->payload_length > 0) {
+        printf("\n╔════════════════════════════════════════════════════════════════════╗\n");
+        printf("║ LAYER 7 - APPLICATION / PAYLOAD                                   ║\n");
+        printf("╚════════════════════════════════════════════════════════════════════╝\n");
+        printf("  Protocol:         ");
+        if (packet->app_protocol == PROTO_HTTP) printf("HTTP\n");
+        else if (packet->app_protocol == PROTO_HTTPS) printf("HTTPS/TLS\n");
+        else if (packet->app_protocol == PROTO_DNS) printf("DNS\n");
+        else printf("Unknown\n");
+        printf("  Payload Length:   %u bytes\n", packet->payload_length);
+        printf("\n  Payload Data (first 128 bytes):\n");
+        
+        uint32_t bytes_to_show = packet->payload_length < 128 ? packet->payload_length : 128;
+        for (uint32_t i = 0; i < bytes_to_show; i += 16) {
+            printf("    %04X:  ", i);
+            for (uint32_t j = 0; j < 16 && (i + j) < bytes_to_show; j++) {
+                printf("%02X ", packet->payload[i + j]);
+            }
+            for (uint32_t j = bytes_to_show - i; j < 16 && i + j >= bytes_to_show; j++) {
+                printf("   ");
+            }
+            printf("  ");
+            for (uint32_t j = 0; j < 16 && (i + j) < bytes_to_show; j++) {
+                unsigned char c = packet->payload[i + j];
+                printf("%c", isprint(c) ? c : '.');
+            }
+            printf("\n");
+        }
+        if (packet->payload_length > 128) {
+            printf("    ... (%u more bytes)\n", packet->payload_length - 128);
+        }
+    }
+    
+    // Full packet hex dump
+    printf("\n╔════════════════════════════════════════════════════════════════════╗\n");
+    printf("║ COMPLETE PACKET HEX DUMP                                          ║\n");
+    printf("╚════════════════════════════════════════════════════════════════════╝\n");
+    printf("  Total packet size: %u bytes\n\n", packet->raw_length);
+    
+    for (uint32_t i = 0; i < packet->raw_length; i += 16) {
+        printf("  %04X:  ", i);
+        
+        // Hex values
+        for (uint32_t j = 0; j < 16; j++) {
+            if (i + j < packet->raw_length) {
+                printf("%02X ", packet->raw_packet[i + j]);
+            } else {
+                printf("   ");
+            }
+            if (j == 7) printf(" ");
+        }
+        
+        printf("  ");
+        
+        // ASCII representation
+        for (uint32_t j = 0; j < 16 && (i + j) < packet->raw_length; j++) {
+            unsigned char c = packet->raw_packet[i + j];
+            printf("%c", isprint(c) ? c : '.');
+        }
+        printf("\n");
+    }
+    
+    printf("\n╔════════════════════════════════════════════════════════════════════╗\n");
+    printf("║ END OF PACKET ANALYSIS                                            ║\n");
+    printf("╚════════════════════════════════════════════════════════════════════╝\n");
 }
 
 void display_hex_dump(const uint8_t *data, uint32_t length, int max_bytes) {
