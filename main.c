@@ -60,18 +60,44 @@ int main(int argc, char *argv[]) {
                 break;
                 
             case 2:
-                // Start sniffing with filters (Phase 3)
-                printf("\n[C-Shark] This feature will be implemented in Phase 3.\n");
+                // Start sniffing with filters
+                {
+                    int filter_type = select_filter();
+                    if (filter_type != FILTER_NONE) {
+                        char *filter_expr = generate_filter_expression(filter_type);
+                        if (filter_expr != NULL) {
+                            printf("\n[C-Shark] Applying filter: %s (%s)\n", 
+                                   get_filter_name(filter_type), filter_expr);
+                            start_sniffing_filtered(selected_device, filter_expr);
+                            free(filter_expr);
+                        } else {
+                            printf("\n[C-Shark] Error generating filter expression.\n");
+                        }
+                    } else {
+                        printf("\n[C-Shark] No filter selected. Returning to menu.\n");
+                    }
+                }
                 break;
                 
             case 3:
-                // Inspect last session (Phase 5)
-                printf("\n[C-Shark] This feature will be implemented in Phase 5.\n");
+                // Inspect last session
+                if (!storage_has_session()) {
+                    printf("\n[C-Shark] No capture session available.\n");
+                    printf("[C-Shark] Please capture some packets first (Option 1 or 2).\n");
+                } else {
+                    printf("\n[C-Shark] This feature will be fully implemented in Phase 5.\n");
+                    printf("[C-Shark] Current session has %u packets stored.\n", storage_get_count());
+                }
                 break;
                 
             case 4:
                 // Exit
                 printf("\n[C-Shark] Thank you for using C-Shark. Goodbye!\n");
+                
+                // Clean up storage
+                storage_clear_session();
+                
+                // Free selected device
                 free(selected_device);
                 return 0;
                 
@@ -81,6 +107,10 @@ int main(int argc, char *argv[]) {
         }
     }
     
+    // Clean up storage
+    storage_clear_session();
+    
+    // Free selected device
     free(selected_device);
     return 0;
 }

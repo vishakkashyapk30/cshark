@@ -58,6 +58,9 @@ void start_sniffing_all(char *device) {
     printf("[C-Shark] Press Ctrl+C to stop capture and return to menu.\n");
     printf("[C-Shark] Press Ctrl+D to exit C-Shark.\n\n");
     
+    // Initialize storage for new session
+    storage_init_session();
+    
     // Reset packet counter for new session
     packet_id = 0;
     
@@ -84,6 +87,10 @@ void start_sniffing_all(char *device) {
     // Clean up
     stop_capture(handle);
     
+    // Display session summary
+    printf("\n[C-Shark] Session complete. Captured %u packets (stored for inspection).\n", 
+           storage_get_count());
+    
     // Reset interrupt flag for next session
     capture_interrupted = 0;
 }
@@ -95,6 +102,9 @@ void start_sniffing_filtered(char *device, char *filter) {
     printf("[C-Shark] Filter: %s\n", filter);
     printf("[C-Shark] Press Ctrl+C to stop capture and return to menu.\n");
     printf("[C-Shark] Press Ctrl+D to exit C-Shark.\n\n");
+    
+    // Initialize storage for new session
+    storage_init_session();
     
     // Reset packet counter for new session
     packet_id = 0;
@@ -122,6 +132,10 @@ void start_sniffing_filtered(char *device, char *filter) {
     // Clean up
     stop_capture(handle);
     
+    // Display session summary
+    printf("\n[C-Shark] Session complete. Captured %u packets (stored for inspection).\n", 
+           storage_get_count());
+    
     // Reset interrupt flag for next session
     capture_interrupted = 0;
 }
@@ -132,18 +146,25 @@ void packet_handler(u_char *args, const struct pcap_pkthdr *header, const u_char
     // Increment packet ID
     packet_id++;
     
-    // Create a parsed packet structure for display
+    // Create a parsed packet structure
     parsed_packet_t parsed;
     memset(&parsed, 0, sizeof(parsed_packet_t));
     
+    // Set packet ID
     parsed.id = packet_id;
-    parsed.timestamp = header->ts;
-    parsed.length = header->len;
-    parsed.raw_packet = packet;
-    parsed.raw_length = header->len;
     
-    // For Phase 1, just display basic info
+    // Parse the packet completely (all layers)
+    parse_packet(header, packet, &parsed);
+    
+    // Display the parsed packet
     display_packet_live(&parsed);
+    
+    // Store the packet for later inspection
+    int result = storage_add_packet(&parsed);
+    if (result == -1) {
+        // Storage full or error - just continue capturing without storing
+        // This is silent to avoid cluttering the output during live capture
+    }
 }
 
 void stop_capture(pcap_t *handle) {
