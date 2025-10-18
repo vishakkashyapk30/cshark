@@ -13,6 +13,8 @@
 #include <netinet/udp.h>
 #include <net/if_arp.h>
 
+// LLM Generated Code Starts Here
+
 void parse_packet(const struct pcap_pkthdr *header, const u_char *packet, parsed_packet_t *parsed) {
     // Store basic packet info
     parsed->timestamp = header->ts;
@@ -204,3 +206,4 @@ void parse_payload(const u_char *packet, int offset, parsed_packet_t *parsed) {
     }
 }
 
+// LLM Generated Code Ends Here

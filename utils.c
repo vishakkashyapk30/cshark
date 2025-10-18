@@ -9,6 +9,8 @@
 #include <string.h>
 #include <stdlib.h>
 
+// LLM Generated Code Starts Here
+
 // Global flag for Ctrl+C handling
 volatile sig_atomic_t capture_interrupted = 0;
 
@@ -125,3 +127,4 @@ uint16_t calculate_checksum(const uint8_t *data, int length) {
     return ~sum;
 }
 
+// LLM Generated Code Starts Here

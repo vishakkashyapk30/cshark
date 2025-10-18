@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+// LLM Generated Code Starts Here
+
 int discover_interfaces(pcap_if_t **alldevs) {
     char errbuf[PCAP_ERRBUF_SIZE];
     
@@ -92,3 +94,4 @@ void free_interfaces(pcap_if_t *alldevs) {
     }
 }
 
+// LLM Generated Code Ends Here

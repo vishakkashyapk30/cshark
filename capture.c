@@ -1,12 +1,12 @@
 /*
  * Packet Capture Module Implementation
  */
-
 #include "cshark.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+// LLM Generated Code Starts Here
 // Global packet counter
 static uint32_t packet_id = 0;
 
@@ -173,4 +173,4 @@ void stop_capture(pcap_t *handle) {
     }
     printf("\n[C-Shark] Capture stopped.\n");
 }
-
+// LLM Generated Code Endss Here

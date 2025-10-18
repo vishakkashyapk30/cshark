@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <ctype.h>
 
+// LLM Generated Code Starts Here
+
 void display_banner(void) {
     printf("\n[C-Shark] The Command-Line Packet Predator\n");
     printf("==============================================\n");
@@ -553,3 +555,4 @@ const char* get_port_service(uint16_t port) {
     }
 }
 
+// LLM Generated Code Ends Here

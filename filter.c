@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+// LLM Generated Code Starts Here
+
 int select_filter(void) {
     printf("\n[C-Shark] Select Protocol Filter:\n");
     printf("=================================\n");
@@ -126,3 +128,4 @@ int packet_matches_filter(const parsed_packet_t *packet, int filter_type) {
     }
 }
 
+// LLM Generated Code Ends Here

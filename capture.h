@@ -8,6 +8,7 @@
 
 #include <pcap.h>
 
+// LLM Generated Code Starts Here
 // Capture context structure
 typedef struct {
     pcap_t *handle;
@@ -32,4 +33,4 @@ void packet_handler(u_char *args, const struct pcap_pkthdr *header, const u_char
 void stop_capture(pcap_t *handle);
 
 #endif // CAPTURE_H
-
+// LLM Generated Code Ends Here

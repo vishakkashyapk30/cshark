@@ -9,6 +9,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+// LLM Generated Code Starts Here
+
 void inspect_session(void) {
     if (!storage_has_session()) {
         printf("\n[C-Shark] No capture session available.\n");
@@ -131,3 +133,4 @@ void inspect_packet_detailed(uint32_t packet_id) {
     display_packet_detailed(packet);
 }
 
+// LLM Generated Code Ends Here
