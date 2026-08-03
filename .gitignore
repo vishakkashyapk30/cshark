@@ -1,3 +1,4 @@
 *.o
 build/
 cshark
+tests/test_detect
