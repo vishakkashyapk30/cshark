@@ -19,8 +19,10 @@ void display_main_menu(const char *selected_interface) {
     printf("\n1. Start Sniffing (All Packets)\n");
     printf("2. Start Sniffing (With Filters)\n");
     printf("3. Inspect Last Session\n");
-    printf("4. Exit C-Shark\n");
-    printf("\nEnter your choice (1-4): ");
+    printf("4. View Security Alerts (Port-Scan / ARP-Spoof)\n");
+    printf("5. Export Session Data (CSV / PCAP)\n");
+    printf("6. Exit C-Shark\n");
+    printf("\nEnter your choice (1-6): ");
     fflush(stdout);
 }
 

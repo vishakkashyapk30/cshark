@@ -6,8 +6,12 @@
 #include "storage.h"
 #include "display.h"
 #include "utils.h"
+#include "detect.h"
+#include "export.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <time.h>
 
 // LLM Generated Code Starts Here
 
@@ -131,6 +135,90 @@ void inspect_packet_detailed(uint32_t packet_id) {
     
     // Display comprehensive packet analysis
     display_packet_detailed(packet);
+}
+
+void view_security_alerts(void) {
+    uint32_t count = detect_get_alert_count();
+
+    printf("\n========================================\n");
+    printf("SECURITY ALERTS (this session)\n");
+    printf("========================================\n");
+
+    if (count == 0) {
+        printf("No alerts raised. No port-scan or ARP-spoof signatures detected.\n");
+        printf("========================================\n");
+        return;
+    }
+
+    printf("Total alerts: %u\n", count);
+    printf("----------------------------------------\n");
+    printf("%-10s | %-12s | %s\n", "Time", "Type", "Details");
+    printf("----------------------------------------\n");
+
+    for (uint32_t i = 0; i < count; i++) {
+        const alert_record_t *alert = detect_get_alert(i);
+        if (alert == NULL) continue;
+
+        char time_str[16];
+        struct tm *tm_info = localtime(&alert->timestamp);
+        strftime(time_str, sizeof(time_str), "%H:%M:%S", tm_info);
+
+        printf("%-10s | %-12s | %s\n", time_str, alert->type, alert->details);
+    }
+
+    printf("========================================\n");
+}
+
+void export_session_menu(void) {
+    if (!storage_has_session()) {
+        printf("\n[C-Shark] No capture session available to export.\n");
+        printf("[C-Shark] Please capture some packets first (Option 1 or 2).\n");
+        return;
+    }
+
+    printf("\n[C-Shark] Export Session Data:\n");
+    printf("=================================\n");
+    printf("1. Export packet flows to CSV (Azure NSG flow-log style)\n");
+    printf("2. Export security alerts to CSV\n");
+    printf("3. Export full session to a .pcap file (opens in Wireshark)\n");
+    printf("4. Back to Main Menu\n");
+    printf("\nEnter your choice (1-4): ");
+    fflush(stdout);
+
+    int choice = get_user_choice(1, 4);
+    if (choice == -1 || choice == 4) {
+        printf("[C-Shark] Returning to main menu.\n");
+        return;
+    }
+
+    const char *default_name = (choice == 1) ? "session_flows.csv" :
+                                (choice == 2) ? "session_alerts.csv" : "session.pcap";
+
+    char path[256];
+    printf("Enter output file path [default: %s]: ", default_name);
+    fflush(stdout);
+
+    if (fgets(path, sizeof(path), stdin) == NULL) {
+        printf("[C-Shark] No input received. Export cancelled.\n");
+        return;
+    }
+
+    // Strip trailing newline
+    size_t len = strlen(path);
+    if (len > 0 && path[len - 1] == '\n') {
+        path[len - 1] = '\0';
+    }
+    if (path[0] == '\0') {
+        strncpy(path, default_name, sizeof(path) - 1);
+        path[sizeof(path) - 1] = '\0';
+    }
+
+    switch (choice) {
+        case 1: export_session_csv(path); break;
+        case 2: export_alerts_csv(path); break;
+        case 3: export_session_pcap(path); break;
+        default: break;
+    }
 }
 
 // LLM Generated Code Ends Here
