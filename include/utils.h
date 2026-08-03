@@ -17,6 +17,12 @@ extern volatile sig_atomic_t capture_interrupted;
 void setup_signal_handlers(void);
 void handle_sigint(int sig);
 
+// Arms a SIGALRM that fires after `seconds` and trips the same
+// `capture_interrupted` flag as Ctrl+C - used by headless/scripted capture
+// mode (see main.c) to stop a capture loop after a fixed duration without
+// requiring an interactive Ctrl+C.
+void arm_capture_timeout(int seconds);
+
 // Input handling
 int get_user_choice(int min, int max);
 void clear_input_buffer(void);

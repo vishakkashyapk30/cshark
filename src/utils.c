@@ -8,6 +8,7 @@
 #include <time.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 // LLM Generated Code Starts Here
 
@@ -28,6 +29,15 @@ void handle_sigint(int sig) {
     (void)sig; // Suppress unused parameter warning
     capture_interrupted = 1;
     printf("\n\n[C-Shark] Capture interrupted. Returning to menu...\n");
+}
+
+void arm_capture_timeout(int seconds) {
+    struct sigaction sa;
+    sa.sa_handler = handle_sigint; // same effect as Ctrl+C: stop the capture loop
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGALRM, &sa, NULL);
+    alarm((unsigned int)(seconds > 0 ? seconds : 1));
 }
 
 int get_user_choice(int min, int max) {
