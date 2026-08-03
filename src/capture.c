@@ -61,6 +61,9 @@ void start_sniffing_all(char *device) {
     // Initialize storage for new session
     storage_init_session();
     
+    // Initialize security detection state (port-scan + ARP-spoof heuristics)
+    detect_init();
+    
     // Reset packet counter for new session
     packet_id = 0;
     
@@ -87,9 +90,16 @@ void start_sniffing_all(char *device) {
     // Clean up
     stop_capture(handle);
     
+    // Tear down detection working state (alert log survives for inspection)
+    detect_cleanup();
+    
     // Display session summary
     printf("\n[C-Shark] Session complete. Captured %u packets (stored for inspection).\n", 
            storage_get_count());
+    if (detect_get_alert_count() > 0) {
+        printf("[C-Shark] %u security alert(s) raised - see 'View Security Alerts' in the menu.\n",
+               detect_get_alert_count());
+    }
     
     // Reset interrupt flag for next session
     capture_interrupted = 0;
@@ -105,6 +115,9 @@ void start_sniffing_filtered(char *device, char *filter) {
     
     // Initialize storage for new session
     storage_init_session();
+    
+    // Initialize security detection state (port-scan + ARP-spoof heuristics)
+    detect_init();
     
     // Reset packet counter for new session
     packet_id = 0;
@@ -132,9 +145,16 @@ void start_sniffing_filtered(char *device, char *filter) {
     // Clean up
     stop_capture(handle);
     
+    // Tear down detection working state (alert log survives for inspection)
+    detect_cleanup();
+    
     // Display session summary
     printf("\n[C-Shark] Session complete. Captured %u packets (stored for inspection).\n", 
            storage_get_count());
+    if (detect_get_alert_count() > 0) {
+        printf("[C-Shark] %u security alert(s) raised - see 'View Security Alerts' in the menu.\n",
+               detect_get_alert_count());
+    }
     
     // Reset interrupt flag for next session
     capture_interrupted = 0;
@@ -155,6 +175,10 @@ void packet_handler(u_char *args, const struct pcap_pkthdr *header, const u_char
     
     // Parse the packet completely (all layers)
     parse_packet(header, packet, &parsed);
+    
+    // Run security heuristics on the parsed packet (cheap, O(1) amortized per packet)
+    detect_port_scan_observe(&parsed);
+    detect_arp_spoof_observe(&parsed);
     
     // Display the parsed packet
     display_packet_live(&parsed);

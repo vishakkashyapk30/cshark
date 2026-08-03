@@ -35,8 +35,8 @@
 #include "display.h"
 #include "filter.h"
 #include "storage.h"
+#include "detect.h"
 #include "inspection.h"
 #include "utils.h"
 
 #endif // CSHARK_H
-
