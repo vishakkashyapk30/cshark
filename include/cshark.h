@@ -37,6 +37,7 @@
 #include "storage.h"
 #include "detect.h"
 #include "export.h"
+#include "subnet.h"
 #include "inspection.h"
 #include "utils.h"
 
