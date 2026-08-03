@@ -3,7 +3,27 @@
 This document is written for a coding agent (or contributor) picking up this repo to
 implement the next set of features. Read this fully before writing code. Follow the
 existing architecture and coding conventions (see "Codebase Conventions" below) —
-do not introduce a new framework, build system, or language.
+do not introduce a new framework, build system, or language for the core C tool.
+
+## 0. Why This Revision Exists
+
+This revision extends the original security-detection plan (section 2 below, unchanged
+in substance) with a set of additions chosen specifically to make this project a strong,
+honest portfolio piece for a **Cloud Network Engineering Intern** role. The JD for that
+role emphasizes:
+
+| JD requirement | How this plan addresses it |
+|---|---|
+| Networking fundamentals (OSI, IP addressing/subnetting, routing/switching) | Already covered by `packet_parser.c` (full L2-L7 dissection); adds a standalone **subnet calculator** (§3.3) to demonstrate IP addressing/subnetting explicitly. |
+| Cloud technologies (Azure, VNets, cloud security, identity/access) | This is a local CLI tool, not an Azure service — we don't fake cloud integration. Instead, §3.2's flow/PCAP export is explicitly documented (README) as analogous to **Azure Network Watcher packet capture** and **NSG flow logs**, and the alert log is analogous to **Network Watcher/Defender for Cloud security alerts**, so the concepts transfer even though the implementation is local. |
+| Scripting & automation (PowerShell/Python) | Adds a **Python** analysis tool (§3.4) and a **PowerShell** automation script (§3.5) that orchestrate the C tool — real, runnable scripts, not documentation-only claims. |
+| Network ops tools (Wireshark, Azure Network Watcher) | Adds real **`.pcap` export** (§3.2) so captures open directly in Wireshark — genuine interop, not just a CSV. |
+| AI/ML in network engineering | Adds a small, honestly-scoped **ML-assisted anomaly triage script** (§3.4) — flags outlier source IPs from flow statistics using an isolation-forest-style model (with a dependency-free statistical fallback), explicitly framed as reducing manual review effort, not as a black-box claim. |
+| Automated testing / large-scale network validation | Adds a **headless/scriptable capture mode** (§3.1) so capture + export + analysis can run non-interactively from CI/scripts instead of only through the interactive menu. |
+
+Do not oversell any of this in the README or resume bullets — every claim must map to
+code that actually exists and was tested. Section 6 has a checklist tying each JD bullet
+to a concrete, verifiable artifact.
 
 ## 1. Current State (as of this plan)
 
@@ -108,13 +128,17 @@ void detect_arp_spoof_observe(const parsed_packet_t *pkt);
 ### 2.3 Alert Surfacing
 - Add `void detect_print_alert(const char *type, const char *details);` in
   `detect.c` that prints a clearly distinguishable line (e.g. prefixed with
-  a red-colored `[ALERT]` tag using the same box-drawing/ANSI style already
-  used in `display.c`) to stdout during live capture, interleaved with the
-  normal live packet display.
-- Alerts must also be retrievable after the fact: extend `packet_session_t`
-  (in `storage.h`) or add a small parallel `alert_log_t` array so that
-  `inspection.c`'s menu can show a "View Security Alerts" option listing all
-  alerts raised during the last session (timestamp, type, details).
+  a red-colored `[ALERT]` tag using ANSI color codes) to stdout during live
+  capture, interleaved with the normal live packet display.
+- Alerts must also be retrievable after the fact: `detect.c` keeps an
+  in-memory `alert_log` (parallel to `packet_session_t`, capped at a fixed
+  size e.g. 512 entries) so that `inspection.c`'s menu can show a
+  "View Security Alerts" option listing all alerts raised during the last
+  session (timestamp, type, details). Exposed via:
+  ```c
+  uint32_t detect_get_alert_count(void);
+  const alert_record_t *detect_get_alert(uint32_t index);
+  ```
 
 ### 2.4 Integration
 - Call `detect_init()` once at the start of `start_sniffing_all()` /
@@ -143,47 +167,181 @@ void detect_arp_spoof_observe(const parsed_packet_t *pkt);
   a saved `.pcap` sample, if PCAP import exists — otherwise a synthetic
   `parsed_packet_t` fixture test) so this doesn't silently regress.
 
-## 3. Nice-to-Have Features (optional, only pick up after section 2 is fully
-   done, tested, and committed)
+## 3. NEW: Cloud/Network-Engineering-Aligned Extensions
 
-These were in the original README's "Future Enhancements" list. Do not start
-these until the must-have features above are complete:
+These are additive, in priority order. Each is independently useful and should
+be implemented as its own module, matching the existing one-concern-per-file
+convention.
 
-- **PCAP file import/export** — read/write standard `.pcap` files
-  (`pcap_open_offline`, `pcap_dump_open`) for interop with Wireshark/tcpdump.
-- **Multi-threaded capture** — producer/consumer with a lock-free or
-  mutex-protected ring buffer so parsing/display don't block the capture
-  callback on high-throughput interfaces.
-- **Live traffic statistics/analytics** — per-protocol packet/byte counters,
-  top-talkers table, simple bandwidth-over-time view.
-- **Packet replay** — re-inject stored/loaded packets onto an interface for
-  automated test-case generation.
-- **Compound BPF filters** — allow chaining filter primitives with AND/OR/NOT
-  in the existing `filter.c` expression generator.
+### 3.1 Headless / Scriptable Capture Mode
+**Why**: everything today requires an interactive menu (`scanf`), which makes
+the tool impossible to drive from a script, cron job, or CI pipeline. Real
+network validation workflows (the kind referenced by "automated testing and
+large-scale network validation" in the JD) need a non-interactive mode.
+
+**Design**:
+- Add CLI argument parsing to `main.c` (plain `argv` parsing, no new deps).
+  If no recognized flags are passed, fall back to today's interactive menu
+  unchanged (backwards compatible).
+- New flags:
+  - `-i, --interface <name>`: device to capture on.
+  - `-t, --time <seconds>`: stop capture automatically after N seconds
+    (implemented via `alarm(2)` + `SIGALRM` reusing the existing
+    `capture_interrupted` flag from `utils.c`, so the existing capture loop
+    in `capture.c` needs no structural change).
+  - `--filter <name>`: one of `http|https|dns|arp|tcp|udp` (maps to the
+    existing `filter.c` generator).
+  - `-o, --csv <path>`: export the session to CSV on completion (§3.2).
+  - `--pcap <path>`: export the session to a real `.pcap` file on completion (§3.2).
+  - `--list-interfaces`: print discovered interfaces and exit (no capture).
+  - `--subnet <CIDR>`: run the subnet calculator (§3.3) and exit (no root needed).
+  - `-h, --help`: usage text.
+- Headless mode must still print the alert log and a session summary to
+  stdout on exit so it's useful when piped into logs.
+
+### 3.2 Session Export (CSV + real PCAP)
+**Why**: bridges C-Shark to the wider tool ecosystem — real `.pcap` export
+means captures open in Wireshark; CSV export is the same shape as an
+**Azure NSG flow log** (5-tuple + bytes + timestamp), and is what feeds the
+Python analysis tool in §3.4.
+
+**Design** — new module `export.c` / `export.h`:
+```c
+int export_session_csv(const char *filepath);   // one row per stored packet
+int export_alerts_csv(const char *filepath);    // one row per raised alert
+int export_session_pcap(const char *filepath);  // real .pcap via pcap_dump*
+```
+- CSV columns: `packet_id,timestamp,src_ip,src_port,dst_ip,dst_port,protocol,length,tcp_flags,info`.
+- PCAP export uses `pcap_open_dead(DLT_EN10MB, SNAP_LEN)` to get a template
+  handle, `pcap_dump_open()` for the file, then replays each stored packet's
+  `raw_packet`/`raw_length` with its original `timestamp` via `pcap_dump()`.
+  This produces a file openable directly in Wireshark/tcpdump.
+- Wire into the interactive menu as a new "Export Session Data" option, and
+  into the headless flags from §3.1.
+
+### 3.3 Subnet Calculator
+**Why**: directly demonstrates "IP addressing and subnetting" from the JD's
+networking-fundamentals bullet, independent of live capture (so it's usable
+without root or a NIC, e.g. in a coding-screen demo).
+
+**Design** — new module `subnet.c` / `subnet.h`:
+```c
+typedef struct {
+    char network[INET_ADDRSTRLEN];
+    char broadcast[INET_ADDRSTRLEN];
+    char netmask[INET_ADDRSTRLEN];
+    char first_usable[INET_ADDRSTRLEN];
+    char last_usable[INET_ADDRSTRLEN];
+    uint32_t usable_hosts;
+    int prefix_len;
+} subnet_info_t;
+
+int subnet_calculate(const char *cidr, subnet_info_t *out); // "192.168.1.10/26" -> fills out
+void subnet_print(const subnet_info_t *info);
+```
+- Pure integer/bitwise arithmetic on the 32-bit IPv4 address, no dependency
+  on external subnetting libraries.
+- Exposed via `cshark --subnet <CIDR>`.
+
+### 3.4 Python AI/ML-Assisted Anomaly Triage
+**Why**: directly demonstrates "interest in understanding how AI/ML can be
+applied to network operations, monitoring, security, automation, and
+analytics" and "Scripting and Automation: Python" from the JD. This is
+explicitly a *second, complementary* detection layer — the C rule-based
+detectors in §2 catch known signatures (port scan, ARP spoof) deterministically;
+this script does unsupervised outlier scoring over flow statistics to catch
+things that don't match a fixed rule, and is meant to reduce manual log review.
+
+**Design** — new directory `tools/`, script `tools/anomaly_detect.py`:
+- Input: the CSV produced by `export_session_csv()` (and optionally
+  `alerts.csv` from `export_alerts_csv()` for cross-referencing).
+- Aggregates rows into per-source-IP feature vectors: packet count, distinct
+  destination ports, distinct destination IPs, total bytes, mean packet
+  size, SYN-only packet ratio.
+- Primary path: `sklearn.ensemble.IsolationForest` if `scikit-learn` is
+  installed (see `tools/requirements.txt`).
+- Fallback path (zero dependencies): a robust modified z-score
+  (median + MAD) across the same feature vectors, so the script still runs
+  with only the Python standard library.
+- Output: a ranked table of the most anomalous source IPs with the
+  contributing features, printed to stdout, plus `--json <path>` to dump the
+  same result machine-readably. Cross-references and marks IPs that were
+  also flagged by `detect.c`'s rule-based alerts.
+- Must not crash or hang on empty/small input files — validate and print a
+  clear message instead.
+
+### 3.5 PowerShell Automation Script
+**Why**: demonstrates "Scripting and Automation: PowerShell" concretely, and
+mirrors the kind of runbook a cloud network engineer writes to orchestrate a
+capture -> export -> analyze -> report pipeline (the same shape as an Azure
+Automation runbook or DevOps pipeline step).
+
+**Design** — new directory `scripts/`, script `scripts/Invoke-CSharkWorkflow.ps1`
+(PowerShell 7+/`pwsh`, cross-platform):
+- Parameters: `-Interface`, `-DurationSeconds` (default 30), `-OutputDir`
+  (default `./reports/<timestamp>/`).
+- Steps: `make` build (if binary missing/stale) -> run
+  `sudo ./cshark -i <Interface> -t <DurationSeconds> -o session.csv --pcap session.pcap`
+  -> invoke `python3 tools/anomaly_detect.py` on the resulting CSV -> merge
+  the rule-based alert log and the ML anomaly output into one timestamped
+  Markdown report under `-OutputDir`.
+- Must fail loudly (non-zero exit code, clear `Write-Error`) if the build,
+  capture, or analysis step fails — this is meant to be usable as a CI/cron
+  step, not just an interactive convenience script.
 
 ## 4. Codebase Conventions
 
+- Directory layout: C sources live in `src/`, headers in `include/`
+  (compiled with `-Iinclude`), tests in `tests/`, and the Python/PowerShell
+  automation layers in `tools/`/`scripts/`. Keep new C modules in this split
+  rather than reintroducing a flat root directory.
 - Pure C (C99), built via the existing `Makefile` (`make`, `make clean`,
-  `make rebuild`). Do not introduce CMake, Meson, or other build systems.
-- No external dependencies beyond `libpcap` (already required). The hash
+  `make rebuild`). Do not introduce CMake, Meson, or other build systems for
+  the C tool. The Python/PowerShell additions in §3.4/§3.5 are separate,
+  optional orchestration layers on top of the compiled binary — they must
+  never become a build-time dependency of `cshark` itself.
+- No external C dependencies beyond `libpcap` (already required). The hash
   tables for detection must be hand-rolled, consistent with the project's
   "zero external libraries beyond libpcap" philosophy.
 - Match existing style: modular `.c`/`.h` pairs per concern, header guards,
   functions documented with a short comment block matching the style seen
   in `capture.h`/`packet_parser.h`.
-- Update `README.md`'s Features/Architecture sections to document the new
-  `detect` module once implemented (do not leave the README stale).
+- Update `README.md`'s Features/Architecture sections to document every new
+  module once implemented (do not leave the README stale).
 - Free all dynamically allocated memory on `detect_cleanup()` — this project
   cares about memory-leak discipline (see `storage.c`'s deep-copy/free
   pattern for reference).
 
 ## 5. Acceptance Checklist
 
-- [ ] `detect.c` / `detect.h` added and wired into `Makefile`
-- [ ] Port-scan detection implemented with 5s sliding window, 15-port threshold
-- [ ] ARP-spoof detection implemented via IP→MAC binding table
-- [ ] Alerts printed live during capture, and viewable post-capture via inspection menu
+- [x] `detect.c` / `detect.h` added and wired into `Makefile`
+- [x] Port-scan detection implemented with 5s sliding window, 15-port threshold
+- [x] ARP-spoof detection implemented via IP→MAC binding table
+- [x] Alerts printed live during capture, and viewable post-capture via inspection menu
 - [ ] Validated against real `nmap` (port scan) and `arpspoof`/`ettercap` (ARP) tests in a lab/VM
-- [ ] No memory leaks (`valgrind --leak-check=full` clean, or equivalent manual audit)
-- [ ] README updated to document the new module
+      (**not done in this environment** — no root/NIC access or `nmap`/`arpspoof` available in
+      this sandbox; needs to be run by whoever has a lab VM before citing exact numbers on a resume)
+- [x] No obvious memory leaks (manual audit of every `malloc`/`free` pair; run
+      `valgrind --leak-check=full` on a live capture before shipping, since libpcap
+      capture can't be fully exercised in this sandbox)
+- [x] README updated to document the new modules
+- [x] `export.c`/`export.h` (CSV + real PCAP export) implemented and wired into menu + CLI
+- [x] `subnet.c`/`subnet.h` (subnet calculator) implemented and exposed via `--subnet`
+- [x] Headless/scriptable capture mode (`-i/-t/-o/--pcap/--filter/--list-interfaces/--help`) added to `main.c`
+- [x] `tools/anomaly_detect.py` implemented with sklearn + dependency-free fallback paths
+- [x] `scripts/Invoke-CSharkWorkflow.ps1` implemented (written for `pwsh`; not executable in this
+      sandbox since `pwsh` isn't installed here — syntax should be validated with `pwsh -File` before relying on it)
 - [ ] Resume bullet's specific numbers (15+ ports/5s) reconciled with actual tested thresholds
+      once real `nmap`/`arpspoof` validation (above) has been run
+
+## 6. JD-to-Artifact Traceability (for interview prep, not for the README)
+
+| JD line | Concrete artifact |
+|---|---|
+| OSI model, IP addressing/subnetting | `packet_parser.c` (L2-L7 dissection) + `subnet.c` (`--subnet` calculator) |
+| Basic internetworking routing/switching | ARP binding table in `detect.c` (IP→MAC resolution is exactly what a switch's ARP table / router's neighbor table does) |
+| Cloud computing / Azure / VNets / cloud security / identity | README section mapping `export.c`'s CSV to NSG flow logs and PCAP export to Network Watcher packet capture; explicitly *not* claiming real Azure integration |
+| PowerShell / Python scripting | `scripts/Invoke-CSharkWorkflow.ps1`, `tools/anomaly_detect.py` |
+| Wireshark / Azure Network Watcher / diagnostics | `export_session_pcap()` (real Wireshark-openable output), `detect.c` alert log (diagnostic signal) |
+| AI/ML in network ops/security/analytics | `tools/anomaly_detect.py` (IsolationForest + statistical fallback over flow features) |
+| Automated testing / large-scale network validation | `main.c` headless mode (§3.1), designed to be driven by CI or the PowerShell runbook |
