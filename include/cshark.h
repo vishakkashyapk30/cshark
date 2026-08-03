@@ -36,6 +36,7 @@
 #include "filter.h"
 #include "storage.h"
 #include "detect.h"
+#include "export.h"
 #include "inspection.h"
 #include "utils.h"
 
