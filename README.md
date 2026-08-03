@@ -7,8 +7,14 @@ A comprehensive terminal-based network packet sniffer and analyzer built in C us
 ## Table of Contents
 - [Overview](#overview)
 - [Features](#features)
+- [Relevance to Cloud/Network Engineering](#relevance-to-cloudnetwork-engineering)
 - [Architecture & Design](#architecture--design)
 - [Network Concepts](#network-concepts)
+- [Security Detection](#security-detection)
+- [Export & Interoperability](#export--interoperability)
+- [Headless / Scriptable Capture Mode](#headless--scriptable-capture-mode)
+- [AI/ML Anomaly Triage (Python)](#aiml-anomaly-triage-python)
+- [Automation Runbook (PowerShell)](#automation-runbook-powershell)
 - [File Structure](#file-structure)
 - [Implementation Details](#implementation-details)
 - [Build & Usage](#build--usage)
@@ -24,6 +30,10 @@ C-Shark is a professional-grade packet analyzer that provides:
 - **BPF filtering** for targeted packet capture
 - **Session storage** for forensic analysis
 - **Interactive inspection** with comprehensive packet breakdown
+- **Real-time security detection** for port scans and ARP spoofing
+- **Export to CSV/PCAP** for interop with Wireshark and downstream analysis
+- **A headless CLI mode** plus companion Python/PowerShell tooling for
+  automated, scriptable network validation
 
 The tool demonstrates advanced systems programming concepts including network programming, memory management, signal handling, and modular software architecture.
 
@@ -39,12 +49,45 @@ The tool demonstrates advanced systems programming concepts including network pr
 - Interactive packet inspection with detailed analysis
 - Complete packet hex dump
 - Graceful interrupt handling (Ctrl+C, Ctrl+D)
+- IPv4 subnet calculator (`--subnet <CIDR>`)
+
+### ✅ Security Detection
+- **Port-scan detection**: flags a source IP contacting 15+ distinct destination ports within a 5-second window
+- **ARP-spoof detection**: flags an IP's bound MAC address changing between ARP replies (classic cache-poisoning signature)
+- Live, color-highlighted `[ALERT]` output plus a post-capture "View Security Alerts" menu
+
+### ✅ Export & Automation
+- CSV flow export (Azure NSG flow-log-style 5-tuple rows) and CSV alert export
+- Real `.pcap` export, openable directly in Wireshark/tcpdump
+- Headless/scriptable CLI mode for CI and automated network validation
+- Companion Python AI/ML anomaly-triage script and PowerShell automation runbook
 
 ### ✅ Protocol Support
 - **Data Link Layer (L2)**: Ethernet
 - **Network Layer (L3)**: IPv4, IPv6, ARP
 - **Transport Layer (L4)**: TCP, UDP
 - **Application Layer (L7)**: HTTP, HTTPS, DNS
+
+---
+
+## Relevance to Cloud/Network Engineering
+
+This project intentionally exercises the fundamentals behind cloud network
+engineering roles, even though it's a local CLI tool rather than an Azure
+service. The mapping below is deliberately honest about what's real local
+implementation versus what's a documented analogy:
+
+| Skill area | What C-Shark does |
+|---|---|
+| OSI model, IP addressing & subnetting | Full L2-L7 packet dissection (`packet_parser.c`) plus a standalone subnet calculator (`subnet.c`, `--subnet <CIDR>`) |
+| Basic internetworking routing/switching | The ARP IP→MAC binding table in `detect.c` implements the same neighbor-resolution bookkeeping a switch/router performs |
+| Cloud security fundamentals | Real-time intrusion heuristics (port-scan, ARP-spoof) with a persistent alert log - conceptually the same job as Azure Network Watcher/Defender for Cloud alerts, implemented locally |
+| Azure Network Watcher / Wireshark-style diagnostics | `export_session_pcap()` produces a real `.pcap` openable in Wireshark; `export_session_csv()` produces NSG-flow-log-shaped CSV rows |
+| PowerShell / Python scripting & automation | `scripts/Invoke-CSharkWorkflow.ps1` (capture → export → analyze → report pipeline) and `tools/anomaly_detect.py` |
+| AI/ML in network operations & analytics | `tools/anomaly_detect.py` - unsupervised outlier scoring (IsolationForest, with a dependency-free statistical fallback) over per-source-IP flow statistics |
+| Automated testing / large-scale network validation | Headless CLI mode (`-i/-t/-o/--pcap`) makes capture scriptable/CI-friendly instead of menu-only |
+
+See `PLAN.md` for the full traceability table and the reasoning behind each addition.
 
 ---
 
@@ -124,6 +167,20 @@ C-Shark follows a **modular, layered architecture** with clear separation of con
 - Comprehensive packet breakdown
 - Full hex dump of entire packet frame
 - Forensic-level detail for analysis
+- "View Security Alerts" and "Export Session Data" menu entries
+
+#### 8. **Detection Module**
+- Two hand-rolled hash tables (no external deps): port-scan tracker keyed by
+  source IP, ARP IP→MAC binding table
+- Runs inline in `packet_handler()` on every captured packet
+- Raises alerts both live (colored `[ALERT]` line) and into an in-memory log
+
+#### 9. **Export Module**
+- CSV flow export, CSV alert export, and real `.pcap` export via `pcap_dump*`
+- Bridges C-Shark to Wireshark and to the Python analysis tooling
+
+#### 10. **Subnet Module**
+- Standalone IPv4 CIDR subnet calculator, usable without root or a capture session
 
 ---
 
@@ -204,25 +261,168 @@ Packets are parsed as layered structures:
 
 ---
 
+## Security Detection
+
+C-Shark runs two rule-based, real-time heuristics on every captured packet
+(`detect.c`), independent of the OSI-layer display:
+
+### Port-Scan Detection
+Flags a source IP as a probable port-scanner if it contacts **15 or more
+distinct destination ports within a 5-second sliding window**. Implemented
+as a hand-rolled hash table (1024 buckets, chained) keyed by source IP, each
+holding a small dynamic array of `{port, timestamp}` observations that gets
+pruned to the active window on every packet. Re-alerts for the same source
+are suppressed for 30 seconds to avoid log spam.
+
+### ARP-Spoof Detection
+Maintains an IP → MAC binding table populated only from ARP **replies**. If
+an IP's bound MAC changes between replies, it raises an alert with both the
+old and new MAC — the classic ARP cache-poisoning signature. Gratuitous
+replies from the *same* MAC are not flagged; only an actual binding change is.
+
+### Alerts
+Alerts print live, interleaved with packet output, prefixed with a
+bold-red `[ALERT]` tag, and are also retained in an in-memory log for the
+current session — viewable afterward via the main menu's **"View Security
+Alerts"** option, or exported to CSV (see below).
+
+> **Validating this yourself**: this was implemented and regression-tested
+> with synthetic packet fixtures (`make test`, see `tests/test_detect.c`),
+> but has *not* been validated against real `nmap`/`arpspoof` traffic in
+> this environment (no root/NIC access or those tools available in this
+> sandbox). Before citing "detects port scans" on a resume, run it against
+> `nmap -sS -p 1-100 <target>` and `arpspoof` in a lab VM you control, and
+> confirm the alert output looks correct end-to-end.
+
+---
+
+## Export & Interoperability
+
+`export.c` writes the current session out in formats other tools understand:
+
+| Function | Output | Use case |
+|---|---|---|
+| `export_session_csv()` | `packet_id,timestamp,src_ip,src_port,dst_ip,dst_port,protocol,length,tcp_flags,info` | Same shape as an **Azure NSG flow log** (5-tuple + bytes); feeds `tools/anomaly_detect.py` |
+| `export_alerts_csv()` | `timestamp,type,details` | Feeds the alert cross-reference in `tools/anomaly_detect.py` |
+| `export_session_pcap()` | A real `.pcap` file via `pcap_dump*` | Open directly in **Wireshark** or `tcpdump -r` |
+
+Reachable interactively via the main menu's **"Export Session Data"**
+option, or non-interactively via the `-o`/`--pcap` CLI flags (see below).
+
+---
+
+## Headless / Scriptable Capture Mode
+
+Everything above is also reachable without the interactive menu, so C-Shark
+can be driven from scripts, cron, or CI — the same shape as automated network
+validation pipelines:
+
+```bash
+# Capture on eth0 for 60 seconds, export flows + a real pcap, then exit
+sudo ./cshark -i eth0 -t 60 -o session_flows.csv --pcap session.pcap
+
+# Same, but only TCP traffic
+sudo ./cshark -i eth0 -t 60 --filter tcp -o session_flows.csv
+
+# List interfaces without needing to capture
+./cshark --list-interfaces
+
+# Subnet calculator - no root needed
+./cshark --subnet 10.0.0.0/24
+```
+
+The timed stop is implemented with `alarm()` + `SIGALRM`, reusing the exact
+same `capture_interrupted` flag as Ctrl+C, so `capture.c`'s capture loop
+needed no structural changes. Alerts and a session summary print to stdout
+on exit, so headless runs are log-friendly.
+
+Run `./cshark --help` for the full flag reference.
+
+---
+
+## AI/ML Anomaly Triage (Python)
+
+`tools/anomaly_detect.py` is a second, complementary detection layer on top
+of `detect.c`'s deterministic rules. It aggregates the CSV flow export into
+per-source-IP feature vectors (packet count, distinct destination ports,
+distinct destination IPs, total bytes, mean packet size, SYN-only ratio) and
+scores them for outliers:
+
+- **With `scikit-learn` installed** (`pip install -r tools/requirements.txt`):
+  uses `IsolationForest`.
+- **With zero dependencies**: falls back to a robust modified z-score
+  (median + MAD) across the same features — the script never hard-fails
+  for lack of a Python package.
+
+It also cross-references its ranking against `detect.c`'s alert log, so you
+can see where the rule-based and ML-based layers agree.
+
+```bash
+python3 tools/anomaly_detect.py session_flows.csv \
+    --alerts session_alerts.csv \
+    --top 10 \
+    --json anomalies.json
+```
+
+This is explicitly scoped as *triage assistance*, not a black-box claim —
+the output shows the raw features behind every score so a human can verify
+the reasoning.
+
+---
+
+## Automation Runbook (PowerShell)
+
+`scripts/Invoke-CSharkWorkflow.ps1` (PowerShell 7+/`pwsh`, cross-platform)
+chains the pieces above into one command — build → timed capture → export →
+Python analysis → a single Markdown report:
+
+```bash
+sudo pwsh ./scripts/Invoke-CSharkWorkflow.ps1 -Interface eth0 -DurationSeconds 60
+```
+
+It fails loudly (non-zero exit, `Write-Error`) at the first broken step, so
+it's meant to be wired into CI/cron rather than only run interactively — the
+same shape as an Azure Automation runbook or DevOps pipeline step for
+periodic network health checks.
+
+---
+
 ## File Structure
+
+```
+cshark/
+├── src/            # All .c implementation files
+├── include/        # All .h header files (compiled with -Iinclude)
+├── build/          # Object files (created by `make`, gitignored)
+├── tests/          # Regression tests (make test)
+├── tools/          # Python AI/ML analysis tooling
+├── scripts/        # PowerShell automation runbook
+├── Makefile
+├── README.md
+└── PLAN.md
+```
+
+Section headings below refer to files by name only (e.g. `main.c`); the
+actual paths are `src/main.c` and `include/*.h` as laid out above.
 
 ### Core Application Files
 
-#### **main.c** (118 lines)
-**Purpose**: Entry point and main application controller
+#### **main.c** (in `src/`)
+**Purpose**: Entry point, CLI argument parsing, and main application controller
 - Initializes signal handlers
+- Parses CLI flags for headless/scriptable mode (see "Headless / Scriptable Capture Mode")
 - Manages main menu loop
 - Orchestrates all modules
 - Handles user interaction flow
 - Cleanup on exit
 
 **Key Functions**:
-- `main()` - Program entry, menu loop
-- Menu handling for all 4 options
+- `main()` - Program entry, CLI parsing, menu loop
+- Menu handling for all 6 options (capture, filtered capture, inspect, view alerts, export, exit)
 
 ---
 
-#### **cshark.h** (43 lines)
+#### **cshark.h** (in `include/`)
 **Purpose**: Central header file with common includes and constants
 - Defines MAX_PACKETS (10,000)
 - Includes all standard libraries
@@ -477,6 +677,72 @@ typedef struct {
 
 ---
 
+### Detection Module
+
+#### **detect.c/h**
+**Purpose**: Real-time port-scan and ARP-spoof heuristics
+
+**Key Functions**:
+- `detect_init()` / `detect_cleanup()` - session lifecycle (mirrors `storage_init_session()`/`storage_clear_session()`)
+- `detect_port_scan_observe()` - hash-table-backed sliding-window port-scan tracker
+- `detect_arp_spoof_observe()` - IP→MAC binding table with change detection
+- `detect_print_alert()` - live alert output + append to the in-memory alert log
+- `detect_get_alert_count()` / `detect_get_alert()` - accessors for post-capture review
+
+**Concepts Used**:
+- Hand-rolled chained hash tables (djb2 string hashing, Fibonacci hashing for IPs)
+- Sliding-window pruning over dynamic arrays
+- Alert-log pattern separate from packet storage (survives `detect_cleanup()`)
+
+---
+
+### Export Module
+
+#### **export.c/h**
+**Purpose**: Session export to CSV (flows, alerts) and real `.pcap`
+
+**Key Functions**:
+- `export_session_csv()` - Azure-NSG-flow-log-style CSV of every stored packet
+- `export_alerts_csv()` - CSV of the security alert log
+- `export_session_pcap()` - real pcap file via `pcap_open_dead()` + `pcap_dump_open()`/`pcap_dump()`
+
+**Concepts Used**:
+- libpcap's "dead handle" pattern for writing pcap files without a live capture
+- CSV field quoting/escaping for free-text columns
+
+---
+
+### Subnet Module
+
+#### **subnet.c/h**
+**Purpose**: Standalone IPv4 CIDR subnet calculator
+
+**Key Functions**:
+- `subnet_calculate()` - parses `a.b.c.d/prefix`, computes network/broadcast/usable range
+- `subnet_print()` - formatted output
+
+**Concepts Used**:
+- Pure bitwise arithmetic on 32-bit host-order addresses
+- RFC 3021 special-casing for /31 and /32
+
+---
+
+### Companion Tooling (outside the C build)
+
+#### **tools/anomaly_detect.py**
+Python AI/ML-assisted anomaly triage over the CSV flow export - see
+[AI/ML Anomaly Triage](#aiml-anomaly-triage-python) above.
+
+#### **scripts/Invoke-CSharkWorkflow.ps1**
+PowerShell automation runbook chaining build → capture → export → analysis →
+report - see [Automation Runbook](#automation-runbook-powershell) above.
+
+#### **tests/test_detect.c**
+Regression test for `detect.c` using synthetic `parsed_packet_t` fixtures
+(no root/NIC required). Run via `make test`.
+
+---
+
 ## Implementation Details
 
 ### Memory Management Strategy
@@ -529,7 +795,7 @@ while (!capture_interrupted) {
 
 ### Prerequisites
 ```bash
-# Install libpcap development headers
+# Install libpcap development headers (required for the C tool)
 sudo apt-get install libpcap-dev
 
 # For other distros:
@@ -537,12 +803,18 @@ sudo apt-get install libpcap-dev
 # sudo pacman -S libpcap              # Arch
 ```
 
+Optional, only needed for the companion tooling:
+- **Python 3** for `tools/anomaly_detect.py` (runs with zero extra packages;
+  `pip install -r tools/requirements.txt` upgrades it to use scikit-learn)
+- **PowerShell 7+ (`pwsh`)** for `scripts/Invoke-CSharkWorkflow.ps1`
+
 ### Build Instructions
 ```bash
-# Navigate to B directory
-cd /home/vishak/IIITH-III-I/OSN/mini-project-2-vishakkashyapk30/B
+# Clone and enter the repo
+git clone https://github.com/vishakkashyapk30/cshark.git
+cd cshark
 
-# Build the project
+# Build the project (sources in src/, headers in include/, binary in build/)
 make
 
 # Clean build artifacts
@@ -570,15 +842,24 @@ make run
    - Option 1: Capture all packets (live display)
    - Option 2: Capture with filter (select protocol)
    - Option 3: Inspect last session (view stored packets)
-   - Option 4: Exit application
+   - Option 4: View security alerts (port-scan / ARP-spoof) from the last session
+   - Option 5: Export session data (CSV flows, CSV alerts, or `.pcap`)
+   - Option 6: Exit application
 3. **During Capture**:
-   - View packets in real-time
+   - View packets in real-time, with `[ALERT]` lines interleaved if a
+     port-scan or ARP-spoof signature is detected
    - Press Ctrl+C to stop capture
    - Packets stored for later inspection
 4. **Inspection**:
    - View summary of all captured packets
    - Select packet by ID for detailed analysis
    - View complete packet breakdown
+
+### Non-Interactive / Automated Usage
+For scripting, CI, or validation pipelines, skip the menu entirely - see
+[Headless / Scriptable Capture Mode](#headless--scriptable-capture-mode) and
+the companion [Python](#aiml-anomaly-triage-python) and
+[PowerShell](#automation-runbook-powershell) tooling above.
 
 ---
 
@@ -650,14 +931,17 @@ make run
 ## Future Enhancements
 
 Possible extensions (not implemented):
-- Persistent storage (save/load sessions to disk)
-- PCAP file import/export
+- PCAP file **import** (export already implemented - see `export_session_pcap()`)
 - Advanced filtering (compound BPF expressions)
-- Statistics and analytics
+- Live traffic statistics/analytics (top-talkers, bandwidth-over-time)
 - Protocol-specific parsing (HTTP headers, DNS queries)
 - Multi-threaded capture for high-speed networks
 - TLS decryption with private keys
 - Packet replay capabilities
+- Time-bucketed (rather than whole-session) features in `tools/anomaly_detect.py`
+  for longer-running captures
+
+See `PLAN.md` for the reasoning behind what was prioritized in this iteration.
 
 ---
 
