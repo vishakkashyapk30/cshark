@@ -2,3 +2,5 @@
 build/
 cshark
 tests/test_detect
+__pycache__/
+*.pyc

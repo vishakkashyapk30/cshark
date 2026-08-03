@@ -1,0 +1,10 @@
+# Optional dependencies for tools/anomaly_detect.py.
+#
+# The script runs with ZERO external dependencies using a built-in
+# median/MAD robust z-score fallback. Installing these upgrades it to use
+# scikit-learn's IsolationForest for the same anomaly-scoring job.
+#
+#   pip install -r tools/requirements.txt
+#
+scikit-learn>=1.3
+numpy>=1.24
