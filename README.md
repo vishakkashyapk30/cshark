@@ -10,6 +10,7 @@ A comprehensive terminal-based network packet sniffer and analyzer built in C us
 - [Relevance to Cloud/Network Engineering](#relevance-to-cloudnetwork-engineering)
 - [Architecture & Design](#architecture--design)
 - [Network Concepts](#network-concepts)
+- [Known Limitations](#known-limitations)
 - [Security Detection](#security-detection)
 - [Export & Interoperability](#export--interoperability)
 - [Headless / Scriptable Capture Mode](#headless--scriptable-capture-mode)
@@ -238,10 +239,15 @@ C-Shark analyzes packets following the OSI model layers:
 ### Packet Capture Technology
 
 #### **Promiscuous Mode**
-- Network interface accepts ALL packets on the network
-- Not just packets addressed to its MAC
-- Required for comprehensive network monitoring
+- Network interface accepts all packets it physically receives on the wire/air
+- Not just packets addressed to its own MAC
 - Requires root/administrator privileges
+- **Scope caveat**: on a modern switched network this does *not* mean "see
+  everyone's traffic" — a switch only forwards unicast frames to the port
+  they're destined for, so promiscuous mode alone nets you your own traffic
+  plus broadcast/multicast. Seeing other hosts' traffic requires a SPAN/mirror
+  port, a network tap, or a MITM technique like ARP spoofing (see
+  [Known Limitations](#known-limitations))
 
 #### **BPF (Berkeley Packet Filter)**
 - In-kernel packet filtering language
@@ -258,6 +264,49 @@ Packets are parsed as layered structures:
 [Ethernet Header | IP Header | TCP/UDP Header | Application Data]
      14 bytes    | 20-60 bytes|   8-60 bytes   |   Variable
 ```
+
+---
+
+## Known Limitations
+
+Being explicit about capture scope matters — it's easy for "promiscuous mode"
+to sound like it means "sees all traffic on the network," which it doesn't
+on the networks most people actually run this on today.
+
+### Switched networks: promiscuous mode only sees traffic that reaches the NIC
+Promiscuous mode (`pcap_open_live(..., PROMISC_MODE=1, ...)` in `capture.c`)
+tells the NIC/driver to stop discarding frames not addressed to its own MAC.
+That was powerful on old hub-based Ethernet, where every frame physically
+reached every port on the shared segment. On a modern **switch**, the switch
+itself learns each MAC's port and forwards unicast frames only to that port
+— frames between two *other* hosts never arrive at your NIC in the first
+place, so promiscuous mode can't retroactively "see" them. In practice, on a
+typical switched LAN, `cshark` will observe:
+- The local machine's own inbound/outbound unicast traffic
+- Broadcast traffic (e.g. ARP requests) and multicast traffic the switch
+  floods to every port
+
+To capture other hosts' traffic on a switch, you need a **SPAN/mirror port**
+(a switch feature that duplicates traffic from other ports/VLANs to yours),
+a **network tap** (a passive inline device that duplicates every bit on a
+link), or a MITM technique like ARP spoofing — which is, not coincidentally,
+exactly the attack `detect.c`'s ARP-spoof heuristic is built to catch.
+
+### Wi-Fi (802.11): promiscuous mode ≠ monitor mode
+`cshark` uses plain `pcap_open_live()` promiscuous capture, which is the
+correct approach for a **wired** interface but has real limits on Wi-Fi:
+- **Promiscuous mode** on a wireless NIC only works after the radio is
+  already associated with a specific access point, and only exposes that
+  BSS's traffic (and even then, other clients' WPA2/3 unicast frames are
+  encrypted with pairwise keys you don't have).
+- **Monitor mode** (used by tools like `airmon-ng`/`aircrack-ng`) is a
+  separate radio mode that captures raw 802.11 frames — including
+  management/control frames — from *any* network in range, without
+  associating to an AP at all.
+
+`cshark` does not implement monitor mode, so on a Wi-Fi interface it is
+effectively limited to the local machine's own associated traffic, not a
+full-spectrum 802.11 capture.
 
 ---
 

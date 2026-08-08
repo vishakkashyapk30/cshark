@@ -333,6 +333,15 @@ Automation runbook or DevOps pipeline step).
       sandbox since `pwsh` isn't installed here — syntax should be validated with `pwsh -File` before relying on it)
 - [ ] Resume bullet's specific numbers (15+ ports/5s) reconciled with actual tested thresholds
       once real `nmap`/`arpspoof` validation (above) has been run
+- [x] Capture-scope limitations documented in README ("Known Limitations"): promiscuous
+      mode on a switched network only sees the local host's own + broadcast/multicast
+      traffic (no SPAN/tap/ARP-spoof-in-the-middle = no visibility into other hosts'
+      conversations); Wi-Fi requires monitor mode (not implemented here) for full
+      802.11 capture, since promiscuous mode on Wi-Fi is scoped to the already-associated
+      BSS. Any lab-VM `nmap`/`arpspoof` validation above should be run *against the host
+      running `cshark` itself* (unicast-to-self / broadcast ARP) so it stays within this
+      scope — it will not demonstrate seeing two *other* hosts' traffic without a SPAN
+      port or tap.
 
 ## 6. JD-to-Artifact Traceability (for interview prep, not for the README)
 
